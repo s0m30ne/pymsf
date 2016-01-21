@@ -59,6 +59,8 @@
     root@kali:~# cd msfrpc/python-msfrpc
     root@kali:~# python setup.py install
 
+（7）在config.txt中配置你的token信息
+
 后面每次使用时都需要先使用`msfconsole -r setup.rc`启动msf
 
 ##使用方法

@@ -1,0 +1,8 @@
+#censys
+UID = YOUR UID
+SECRET = YOUR SECRET
+
+#shodan
+API_KEY = YOUR API_KEY
+
+#zoomeye

@@ -5,6 +5,7 @@ import requests
 import time
 import math
 from Queue import Queue
+import re
 
 class Censys(object):
     def __init__(self):
@@ -45,17 +46,20 @@ class Censys(object):
             else:
                 try:
                     results = res.json
+                    if not isinstance(results, dict):
+                        results = res.json()
                 except:
                     print "json decode error !"
                     continue
                 else:
-                    if res.status_code != 200:
+                    if results.has_key("error"):
                         print "error occurred: %s" % results["error"]
                         sys.exit(1)
                     else:
                         result_iter = iter(results["results"])
                         for result in result_iter:
-                            queue.put(result["ip"])
+                            if re.search(r"\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}", result["ip"]):
+                                queue.put(result["ip"])
             end_time = time.time()
             used_time = end_time - start_time
             if used_time > 2.5:

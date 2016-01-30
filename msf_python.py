@@ -147,7 +147,6 @@ class MyMsf(object):
 
     def isTimeout(self, job_list):
         for job_id in job_list.keys():
-            print "the job id is %s" % job_id
             try:
                 job_info = self.client.call('job.info', [int(job_id),])
             except:

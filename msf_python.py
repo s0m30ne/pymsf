@@ -2,6 +2,7 @@ import msfrpc
 from censys import Censys
 from shodan import Shodan
 from zoomeye import Zoomeye
+from local import Local
 from Queue import Queue
 from time import sleep
 from time import time
@@ -35,7 +36,7 @@ class MyMsf(object):
         welcome = self.client.call('console.read', [self.console_id])
         return welcome
 
-    def send_command(self, command, search, thread_num, file_name):
+    def send_command(self, command, search, thread_num, file_name, startIP, endIP, ipfile):
         """Execute a command"""
         if search == "censys":
             self.search = Censys()
@@ -43,6 +44,8 @@ class MyMsf(object):
             self.search = Zoomeye()
         elif search == "shodan":
             self.search = Shodan()
+        elif search == "local":
+            self.search = Local()
         else:
             print "you got a wrong type of search engine, you can select censys, shodan or zoomeye as your scan engine."
             sys.exit()
@@ -56,23 +59,31 @@ class MyMsf(object):
                 if not self.search:
                     print "please select a search engine using the -s or --search option."
                     sys.exit()
-                elif self.query:
-                    if self.module and self.moduleType:
-                        self.search.getConfig()
-                        threads = []
-                        t1 = threading.Thread(target = self.search.searchIP, args = (self.query, self.page, self.queue, self.STOP_ME))
-                        threads.append(t1)
-                        t2 = threading.Thread(target=self.DoExploit, args=(file_name, command, thread_num))
-                        threads.append(t2)
-                        for t in threads:
-                            t.setDaemon(True)
-                            t.start()
+                
+                if (self.module and self.moduleType) or file_name:
+                    if (startIP and endIP) or ipfile:
+                        args = (self.queue, self.STOP_ME, startIP, endIP, ipfile)
+                    else:
+                        if self.query:
+                            self.search.getConfig()
+                            args = (self.query, self.page, self.queue, self.STOP_ME)
+                        else:
+                            return {'prompt': '', 'busy': False, 'data': 'QUERY must be setted\n'}
+                    threads = []
+                    t1 = threading.Thread(target = self.search.searchIP, args = args)
+                    threads.append(t1)
+                    t2 = threading.Thread(target=self.DoExploit, args=(file_name, command, thread_num))
+                    threads.append(t2)
+                    for t in threads:
+                        t.setDaemon(True)
+                        t.start()
 
-                        for t in threads:
-                            t.join()
+                    for t in threads:
+                        t.join()
+                    
                     result = {'prompt': '', 'busy': False, 'data': '\n'}
                 else:
-                    return {'prompt': '', 'busy': False, 'data': 'QUERY must be setted\n'}
+                    return {'prompt': '', 'busy': False, 'data': 'please select the module\n'}
             else:
                 isSuccess = self.client.call('console.write', [self.console_id, command])
                 if isSuccess.has_key('error'):
@@ -166,14 +177,14 @@ class Operate(object):
     def __init__(self):
         self.msf = MyMsf()
 
-    def normal(self, search, thread_num, file_name = None):
+    def runmsf(self, search, thread_num, file_name, startIP, endIP, ipfile):
         self.msf.login()
         prompt = self.msf.get_console()['prompt']
         while True:
             command = raw_input(prompt)
             if command == "exit":
                 break
-            result = self.msf.send_command("%s\n" % command, search, thread_num, file_name)
+            result = self.msf.send_command("%s\n" % command, search, thread_num, file_name, startIP, endIP, ipfile)
             if result['prompt']:
                 prompt = result['prompt'].replace('\x01\x02', '')
             if result['data']:
@@ -182,23 +193,34 @@ class Operate(object):
 def main():
     usage = "usage: %prog [options] "
     parse = optparse.OptionParser(usage = usage)
-    parse.add_option("-n", "--normal", action = "store_true", dest = "normal", help = "normal mode")
     parse.add_option("-s", "--search", dest = "search", action = "store", help = "chose a search engine, for example: censys, zoomeye or shodan")
     parse.add_option("-f", "--file", dest = "file_name", action = "store", help = "the poc file you want to run")
     parse.add_option("-t", "--threads", dest = "thread_num", action = "store", help = "set the thread num")
+    parse.add_option("--start", dest = "startIP", action = "store", help = "the start ip to scan")
+    parse.add_option("--end", dest = "endIP", action = "store", help = "the end ip to scan")
+    parse.add_option("--ipfile", dest = "ipfile", action = "store", help = "the ip file to scan")
     (options, args) = parse.parse_args()
     if not options.file_name:
-        options.normal = True
+        options.file_name = None
     if not options.search:
         options.search = "censys"
     if not options.thread_num:
         options.thread_num = 10
+    if options.startIP and options.endIP:
+        options.search = "local"
+    elif options.startIP or options.endIP:
+        print "You must input the start ip and end ip the same time"
+        sys.exit()
+    else:
+        options.startIP = None
+        options.endIP = None
+    if not options.ipfile:
+        options.ipfile = None
+    else:
+        options.search = "local"
     
     op = Operate()
-    if options.normal:
-        op.normal(options.search, options.thread_num)
-    elif options.file_name:
-        op.normal(options.search, options.thread_num, options.file_name)
+    op.runmsf(options.search, options.thread_num, options.file_name, options.startIP, options.endIP, options.ipfile)
 
 if __name__ == '__main__':
     print """

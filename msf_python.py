@@ -36,7 +36,7 @@ class MyMsf(object):
         welcome = self.client.call('console.read', [self.console_id])
         return welcome
 
-    def send_command(self, command, search, thread_num, file_name, startIP, endIP, ipfile):
+    def send_command(self, command, search, thread_num, exec_cmd, startIP, endIP, ipfile):
         """Execute a command"""
         if search == "censys":
             self.search = Censys()
@@ -60,7 +60,7 @@ class MyMsf(object):
                     print "please select a search engine using the -s or --search option."
                     sys.exit()
                 
-                if (self.module and self.moduleType) or file_name:
+                if (self.module and self.moduleType) or exec_cmd:
                     if (startIP and endIP) or ipfile:
                         args = (self.queue, self.STOP_ME, startIP, endIP, ipfile)
                     else:
@@ -72,7 +72,7 @@ class MyMsf(object):
                     threads = []
                     t1 = threading.Thread(target = self.search.searchIP, args = args)
                     threads.append(t1)
-                    t2 = threading.Thread(target=self.DoExploit, args=(file_name, command, thread_num))
+                    t2 = threading.Thread(target=self.DoExploit, args=(exec_cmd, command, thread_num))
                     threads.append(t2)
                     for t in threads:
                         t.setDaemon(True)
@@ -98,8 +98,8 @@ class MyMsf(object):
                     result = self.client.call('console.read', [self.console_id])
                 
                 if command == "show options\n":
-                    if file_name:
-                        result['data'] = "%s   FILE              %s\n" % (result['data'], file_name)
+                    if exec_cmd:
+                        result['data'] = "%s   command              %s\n" % (result['data'], exec_cmd)
                     result['data'] = "%s   QUERY             %s\n" % (result['data'], self.query)
                     result['data'] = "%s   PAGE              %s\n" % (result['data'], self.page)
 
@@ -132,13 +132,13 @@ class MyMsf(object):
         else:
             return False
 
-    def DoExploit(self, file_name, command, thread_num):
+    def DoExploit(self, exec_cmd, command, thread_num):
         while not self.STOP_ME[0]:
             while not self.queue.empty():
                 ip = self.queue.get()
                 result_str = ""
-                if file_name:
-                    os.system("python %s %s" % (file_name, ip))
+                if exec_cmd:
+                    os.system(exec_cmd % ip)
                 else:
                     while len(self.client.call('job.list', [])) >= thread_num:
                         sleep(1)
@@ -177,14 +177,14 @@ class Operate(object):
     def __init__(self):
         self.msf = MyMsf()
 
-    def runmsf(self, search, thread_num, file_name, startIP, endIP, ipfile):
+    def runmsf(self, search, thread_num, exec_cmd, startIP, endIP, ipfile):
         self.msf.login()
         prompt = self.msf.get_console()['prompt']
         while True:
             command = raw_input(prompt)
             if command == "exit":
                 break
-            result = self.msf.send_command("%s\n" % command, search, thread_num, file_name, startIP, endIP, ipfile)
+            result = self.msf.send_command("%s\n" % command, search, thread_num, exec_cmd, startIP, endIP, ipfile)
             if result['prompt']:
                 prompt = result['prompt'].replace('\x01\x02', '')
             if result['data']:
@@ -194,14 +194,14 @@ def main():
     usage = "usage: %prog [options] "
     parse = optparse.OptionParser(usage = usage)
     parse.add_option("-s", "--search", dest = "search", action = "store", help = "chose a search engine, for example: censys, zoomeye or shodan")
-    parse.add_option("-f", "--file", dest = "file_name", action = "store", help = "the poc file you want to run")
+    parse.add_option("-e", "--exec", dest = "exec_cmd", action = "store", help = "the command you want to run")
     parse.add_option("-t", "--threads", dest = "thread_num", action = "store", help = "set the thread num")
     parse.add_option("--start", dest = "startIP", action = "store", help = "the start ip to scan")
     parse.add_option("--end", dest = "endIP", action = "store", help = "the end ip to scan")
     parse.add_option("--ipfile", dest = "ipfile", action = "store", help = "the ip file to scan")
     (options, args) = parse.parse_args()
-    if not options.file_name:
-        options.file_name = None
+    if not options.exec_cmd:
+        options.exec_cmd = None
     if not options.search:
         options.search = "censys"
     if not options.thread_num:
@@ -220,7 +220,7 @@ def main():
         options.search = "local"
     
     op = Operate()
-    op.runmsf(options.search, options.thread_num, options.file_name, options.startIP, options.endIP, options.ipfile)
+    op.runmsf(options.search, options.thread_num, options.exec_cmd, options.startIP, options.endIP, options.ipfile)
 
 if __name__ == '__main__':
     print """

@@ -72,15 +72,8 @@
 
 ![](http://7xp22c.com1.z0.glb.clouddn.com/options.PNG)
 
-通过`python msf_python.py -f FILENAME`命令用户可以使用自定义的漏洞poc文件，但是编写poc文件时请提供IP参数接口，比如说你可以按照如下格式编写poc：
+通过`python msf_python.py -c COMMAND`命令用户可以使用自定义的命令，比如执行python、ruby等poc文件或者ping等系统命令，但是注意命令中通过%s留出IP接口，比如你可以通过下面的形式执行特定的poc文件：`python msf_python.py -c "python poc.py %s"`
 
-    import sys
-    def poc(ip):
-        manage with the ip
-        ...
-    if __name__ == "__main__":
-        poc(sys.argv[1])
-
-通过`-f`参数指定poc文件后，设置好`QUERY`和`PAGE`参数就可以通过exploit命令执行了。
+通过`-c`参数指定要执行的命令后，设置好`QUERY`和`PAGE`参数就可以通过exploit命令执行了。
 
 你可以通过`-t`参数指定线程数。
